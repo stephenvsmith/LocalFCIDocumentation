@@ -1,0 +1,484 @@
+\documentclass{article}
+
+\usepackage{algpseudocode}
+\usepackage{algorithm}
+\usepackage{float}
+\algdef{SE}[DOWHILE]{Do}{doWhile}{\algorithmicdo}[1]{\algorithmicwhile\ #1}
+\newcommand\independent{\protect\mathpalette{\protect\independenT}{\perp}}
+\def\independenT#1#2{\mathrel{\rlap{$#1#2$}\mkern2mu{#1#2}}}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{bm}
+\usepackage{subcaption}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{minted}
+\usepackage{tikz}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan
+    }
+
+\setlength{\parindent}{0pt}
+
+\newcommand{\Exp}{\mathbb{E}}
+\newcommand{\mat}[1]{\mathbf{#1}}
+\newcommand{\reals}{\mathbb{R}}
+\newcommand{\indep}{\perp \!\!\! \perp}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+\usepackage{titlesec}
+
+\setcounter{secnumdepth}{4}
+
+\titleformat{\paragraph}
+{\normalfont\normalsize\bfseries}{\theparagraph}{1em}{}
+\titlespacing*{\paragraph}
+{0pt}{3.25ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+
+% TODO: set paragraph indent to 0
+
+<<echo=FALSE>>=
+knitr::opts_chunk$set(eval = FALSE)
+@
+
+\title{Complete Package Documentation}
+\author{Stephen Smith}
+\begin{document}
+\maketitle
+\tableofcontents
+
+\vspace{1in}
+
+\section{Introduction}
+
+In this document, we are going to trace the implementation of the local FCI and local PC algorithms, going into detail about some of the design decisions that were made and for the purposes of determining the accuracy of the implementation.\\
+
+This package implements both the sample and population versions of the algorithms we are covering. The population versions of the algorithm use the $d$-separation criterion (implemented by \texttt{bnlearn}) to determine conditional independence (CI) relationships (since the population version assumes a CI oracle). The population version of the algorithm also uses the true DAG to identify neighborhoods, while the sample version must estimate these neighborhoods using data. It is possible to provide the true DAG as a Markov Blanket (MB) oracle while using the data for conditional independence inference, but this scenario is primarily for testing purposes and has no real-world relevance.\\
+
+In this package, most classes and functions contain a boolean variable named \texttt{verbose}, which is used to provide debugging or function progress information.\\
+
+In this guide, I will occasionally refer to so-called ``wrapper'' functions, a term that designates a function which performs basic tasks (e.g. ensuring data inputs are the correct data type) while calling other functions to handle the actual implementation of the various algorithms. This decision was made to improve code readability and, more importantly, facilitates the integration of functions written in R and in Rcpp. \\
+
+The purpose of this guide is to give a detailed overview of how this package is implemented and tested, ensuring that the code is efficient and correct. \\
+
+\newpage
+\section{Analytical Outline}
+
+\begin{enumerate}
+\item R Wrapper Function
+\begin{enumerate}
+\item MB Estimation
+\begin{enumerate}
+\item MMPC
+\item SES
+\item PC-Simple
+\end{enumerate}
+\end{enumerate}
+
+\item C++ Wrapper
+
+
+\end{enumerate}
+
+\newpage
+\section{Local FCI Function Schematic}
+This page provides a graphical overview of functions used to implement the local FCI algorithm. Each arrow represents either a sub-step (green) or a progression in the algorithm where the results from the tail node are used as inputs for the function indicated by the arrowhead node (orange).
+
+\begin{tikzpicture}[main/.style = {draw, circle,node distance=50mm,minimum size=30mm}]
+\node[main] (wrap) {\hyperref[sec:rwrapper]{R Wrapper}};
+\node[main] (mb) [right of=wrap] {\hyperref[sec:mbest]{MB Estimation}};
+\node[main] (cppwrap) [below of=wrap] {C++ Wrapper};
+\node[main] (result) [right of=cppwrap] {Result};
+\node[main] (totalskel) [below of=cppwrap] {Total Skel. Est.};
+\node[main] (targetskel) [right of=totalskel] {Target Skel. Est.};
+\node[main] (vstruct) [below of=totalskel] {V-Structures};
+\node[main] (fcirules) [right of=vstruct] {FCI Rules};
+\node[main] (lfcirules) [right of=fcirules] {Local FCI Rules};
+
+\draw[green,->] (wrap) -- (mb) node [midway, fill=white] {1};
+\draw[orange,->] (mb) to[bend left] node [midway, fill=white] {2} (wrap);
+\draw[orange,->] (wrap) -- (cppwrap) node [midway, fill=white] {3};
+\draw[orange,->] (cppwrap) to [bend right] node [midway, fill=white] {10} (wrap);
+\draw[green,->] (cppwrap) -- (totalskel) node [midway, fill=white] {4};
+\draw[orange,->] (totalskel) -- (targetskel) node [midway, fill=white] {5};
+\draw[orange,->] (targetskel) -- (vstruct) node [midway, fill=white] {6};
+\draw[orange,->] (vstruct) -- (fcirules) node [midway, fill=white] {7};
+\draw[orange,->] (fcirules) -- (lfcirules) node [midway, fill=white] {8};
+\draw[orange,->] (lfcirules) to[bend right] node [midway, fill=white] {9} (cppwrap);
+\draw[orange,->] (wrap) -- (result) node [midway, fill=white] {11};
+\end{tikzpicture}
+
+\newpage
+
+\section{R Wrapper Function}
+\label{sec:rwrapper}
+\textbf{Main Tasks}
+\begin{itemize}
+\item Ensure that the data types are appropriate and the inputs are valid
+\item Provides a function that allows us to both estimate Markov Blankets with R libraries and use Rcpp code for the implementation of hte algorithm
+\item Carries out all necessary algorithm steps with modularity maintained
+\end{itemize}
+
+This function includes calls to \texttt{colMeans} and \texttt{stats::cov} in order to store information about our dataset. In particular, we wish to observe if there are significant scaling differences between our variables in the original dataset before using the \texttt{scale} function to standardize all of our variables. Next, if the true DAG is given as an input, then we are considering the version of the algorithm where the Markov Blankets are known \textit{a priori}. If not, we will estimate the Markov Blankets for the target nodes and their first-order neighbors using the \texttt{MXM} package. We first call \hyperref[subsec:getallmbs]{\texttt{getAllMBs}} to obtain all of the stated Markov Blankets, followed by conveniently storing this information in a matrix using the function \hyperref[subsec:getestinitialdag]{\texttt{getEstInitialDAG}}. This function is a bit of a misnomer, since we are not really approximating the true DAG, but we name it thus because we are attempting to approximate what the true DAG provides us, namely information regarding the Markov Blankets of the nodes we are interested in. This is a matrix where the entries of row $i$ indicate which nodes are included in the estimated neighborhood of $i$. This matrix will be converted in our R implementation using the \texttt{MBList} class.\\
+
+After obtaining the Markov Blankets and ensuring every variable is the correct class, we call the population or sample version of the algorithm implemented in Rcpp. The function returns:
+
+\begin{itemize}
+\item \texttt{amat} - the estimated adjacency matrix produced by the algorithm
+\item \texttt{S} - the separating sets identified by the algorithm
+\item \texttt{NumTests} - the number of conditional independence tests used to identify Markov Blankets and the estimated graph
+\item \texttt{MBNumTests} - the number of conditional independence tests used to identify the Markov Blankets
+\item \texttt{RulesUsed} - a vector providing the number of times each FCI rule was used during edge orientation in the algorithm
+\item \texttt{Nodes} - all the nodes considered by the algorithm, including both target nodes and their first-order neighbors
+\item \texttt{totalSkeletonTime} - the time taken for the first stage in the skeleton estimation process %TODO: what units?
+\item \texttt{targetSkeletonTimes} - a series of values separated by commas in a string providing the time taken for each target skeleton in the second stage of the skeleton estimation process
+\item \texttt{totalTime} - the total amount of time taken to complete the Rcpp function
+\item \texttt{referenceDAG} - either the true DAG or the matrix providing information about the estimated Markov Blankets
+\item \texttt{mbList} - a list containing the estimated Markov Blankets
+\item \texttt{data\_means} - the mean calculated for each variable in the dataset
+\item \texttt{data\_cov} - the variance-covariance matrix for the inputted dataset
+\end{itemize}
+
+\inputminted[linenos,mathescape=true,firstline=28,frame=lines]{R}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/R/localfci.R}
+
+\newpage
+
+\section{Markov Blanket Estimation Functions}
+\label{sec:mbest}
+The \texttt{MXM} package has a variety of algorithms developed for the general problem of feature selection, including algorithms specifically designed for Markov Blanket estimation. 
+% TODO: Points for discussion: Tsamardinos papers, local learning, etc.
+% TODO: Algorithm descriptions
+
+% Use of the \texttt{MXM} package
+
+\subsection{Algorithms}
+
+\subsubsection{MMPC}
+
+\begin{algorithm}[H]
+\footnotesize
+\caption{MaxMin Heuristic}
+\begin{algorithmic}[1]
+\State \textbf{Input:} Data on variables $V$ ($|V|=p$), Target $T$, Subset of variables $\mat{CPC}$
+\State $assocF = \max_{X \in V} MinAssoc(X;T|\mat{CPC})$
+\State $F = \textrm{arg max}_{X \in V} MinAssoc(X;T|\mat{CPC})$
+\State \textbf{Output:} $\langle F, Fassoc \rangle$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\footnotesize
+\caption{$\overline{MMPC}$}
+\begin{algorithmic}[1]
+\State \textbf{Input:} Data on variables $V$ ($|V|=p$), Target $T$
+\State $\bf{CPC}=\emptyset$
+\While {$\bf{CPC}$ is still changing}
+\State $\langle F,assocF \rangle = MaxMinHeuristic(T;\bf{CPC})$
+\If {$assocF \neq 0$}
+\State $\bf{CPC} \leftarrow $ ${\bf CPC}$ $\cup \, F$
+\EndIf
+\EndWhile
+\For {$X \in \bf{CPC}$}
+\If {$\exists S \subseteq \bf{CPC}$, s.t. $Ind(X;T|\bf{S})$}
+\State $\bf{CPC} \leftarrow \bf{CPC} \setminus \{X\}$
+\EndIf
+\EndFor
+\State \textbf{Output:} Candidate Parent-Child Set $\bf{CPC}$
+\end{algorithmic}
+\end{algorithm}
+
+This includes the backward step, which we are skipping since having some false positives in the Markov Blanket should not be considered an important problem at this stage of the algorithm. Thus, we will stick with $\overline{MMPC}$.
+
+\begin{algorithm}[H]
+\footnotesize
+\caption{$MMPC$}
+\begin{algorithmic}[1]
+\State \textbf{Input:} Data on variables $V$ ($|V|=p$), Target $T$
+\State $\bf{CPC}=\overline{MMPC}$
+\For {$X \in \mat{CPC}$}
+\If {$T \notin \overline{MMPC}(X)$}
+\State $\mat{CPC} \leftarrow \mat{CPC} \setminus \{X\}$
+\EndIf
+\EndFor
+\State \textbf{Output:} $\mat{CPC}$ 
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{SES}
+
+\begin{algorithm}[H]
+\footnotesize
+\caption{SES}
+\begin{algorithmic}[1]
+\State \textbf{Input:} Data on variables $V$ ($|V|=p$), Target $T$, Significance Threshold $a$, Max Conditioning Set $k$
+\State $R \leftarrow V$, $S \leftarrow \emptyset$, $Q_i \leftarrow i$, for $i=1,\ldots,p$
+\While{$R \neq \emptyset$}
+\For{$X \in R \cup S$}
+\If {$\exists Z \subseteq S \setminus \{X\}$, $|Z|\leq k$, s.t. $\rho_{XT|Z}>a$}
+\State $R \leftarrow R \setminus \{X\}$, $S \leftarrow S \setminus \{X\}$
+\If {$\exists Y \in Z$, s.t. $Z' \leftarrow (Z \cup \{X\})\setminus \{Y\}$ and $\rho_{YT|Z'}>a$}
+\State $Q_Y \leftarrow Q_Y \cup Q_X$
+\EndIf
+\EndIf
+\EndFor
+\State $M = \underset{X \in R}{\textrm{argmax}}\underset{Z \subseteq S, |Z|\leq k}{\min} -\rho_{XT|Z}$
+\State $R \leftarrow R \setminus \{M\}$, $S \leftarrow S \cup \{M\}$
+\EndWhile
+\State $E \leftarrow \emptyset$
+\For{$i \in S$}
+\State $E \leftarrow E \cup \{Q_i\}$
+\EndFor
+\State \textbf{Output:} Set of signature sets $E$
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{PC-Simple}
+
+A simplified version of the PC-algorithm where we only test for conditional independence with the target variable and other nodes. More work must be done here for the benefits of this algorithm.
+
+\subsection{Markov Blanket Estimation Procedure}
+\begin{enumerate}
+\item Apply \texttt{getMB} to estimate neighbors of each target node. Nodes identified in this step are defined as first-order neighbors. This step is implemented in \texttt{getAllMBs}.
+\item Apply \texttt{getMB} again to estimate the neighborhoods of the first-order neighbors. Nodes in these sets are called second-order neighbors. This step is implemented in \texttt{getFirstOrderNeighborMBs}, which is called by \texttt{constructFinalMBList}
+\item If necessary, capture any spouses of the target node (a) and their neighborhoods (b). This step is implemented in \texttt{captureSpouses} (a) and \texttt{constructFinalMBList} (b).
+
+\end{enumerate}
+
+\subsection{\texttt{getAllMBs}}
+\label{subsec:getallmbs}
+\textbf{Main Tasks}
+\begin{itemize}
+\item Provide a wrapper function for obtaining the Markov Blankets of the target nodes and their first-order neighbors
+\end{itemize}
+In this function, we intend to recover all of the Markov Blankets for each of the targets, and the information found here will be used to create our Markov Blanket List object for the Local FCI algorithm. First, we apply the function \hyperref[subsec:getmb]{\texttt{getMB}} to all of the target nodes in order to obtain the Markov Blankets for each target. Upon concluding this step, we call \texttt{constructFinalMBList} in order to obtain each target node's second-order neighbors by applying \hyperref[subsec:getmb]{\texttt{getMB}} to each of the first-order neighbors identified in the previous step. The list we obtain here will be used throughout the algorithm whenever a node's Markov Blanket is desired.
+
+\inputminted[linenos,mathescape=true,firstline=346,lastline=369,frame=lines]{R}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/R/mbEst.R}
+
+\subsubsection{\texttt{getMB}}
+\label{subsec:getmb}
+\textbf{Main Tasks}
+\begin{itemize}
+\item The workhorse function of \texttt{getAllMBs} to estimate Markov Blankets using algorithms from the \texttt{MXM} library for a single target node
+\item 
+\end{itemize}
+
+In this function, we use one of the algorithms provided by \texttt{MXM} library to estimate the Markov Blanket of a single target node. As of right now, we have three algorithms: MMPC, SES, and PC-simple.\\ % TODO: Briefly describe each of these algorithms
+
+We return the selected variables and the total runtime for obtaining the values, along with the number of conditional independence tests or association measures taken. For MMPC, based on the algorithm, we only take the number of variables accepted into the candidate PC-set (i.e. parent-child set) plus one as the number of tests, even though there are multiple associations calculated at each step. This calculation requires more work to ensure accuracy and a fair comparison between the algorithms. % TODO: Need to verify if this is the right way to calculate it
+
+\inputminted[linenos,mathescape=false,firstline=51,lastline=96,frame=lines]{R}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/R/mbEst.R}
+
+\subsubsection{\texttt{constructFinalMBList}}
+\label{subsubsec:constructfinalmblist}
+\textbf{Main Tasks}
+\begin{itemize}
+\item Identify neighborhoods of first-order neighbors
+\item Capture spouses for PC-set algorithms such as MMPC and SES, and find spouse neighborhoods if necessary
+\item Combine all neighborhoods lists into one and return the total number of tests and the total time
+\end{itemize}
+
+In this function, we take the nodes identified as first-order neighbors of the target nodes and apply the \texttt{getMB} function again to obtain the second-order nodes. Using both of these lists, we then call the \texttt{captureSpouses} function if we are using either the MMPC or SES algorithms (since these only capture parent-child sets) to identify which of the second-order neighbors may be spouses and should be included in a target node Markov Blanket.
+
+\inputminted[linenos,mathescape=false,firstline=260,lastline=327,frame=lines]{R}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/R/mbEst.R}
+
+\paragraph{\texttt{captureSpouses}}
+\label{par:captureSpouses}
+\textbf{Main Tasks}
+\begin{itemize}
+\item Serves as a helper function for \texttt{constructFinalMBList}
+\item Estimate the neighborhoods of first-order neighbors
+\item Attempts to identify spouses, and their neighborhoods if necessary, for algorithms like MMPC and SES
+\end{itemize}
+
+In this function, we iterate through each of the second-order neighbors for the target nodes and conduct an independence test of the target and the second-order neighbor conditioned on the parent-child set. If we decide in favor of dependence (i.e. reject $H_0$), then we add the neighbor to the target node's Markov Blanket as a spouse.
+
+\inputminted[linenos,mathescape=false,firstline=139,lastline=229,frame=lines]{R}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/R/mbEst.R}
+
+\subsection{\texttt{getEstInitialDAG}}
+\label{subsec:getestinitialdag}
+\textbf{Main Tasks}
+\begin{itemize}
+\item Compress neighborhood estimation information from previous steps to prepare for Rcpp code
+\end{itemize}
+From the previous steps, we take the list of Markov Blankets around the target nodes and combine the information into an adjacency matrix. In our matrix \texttt{adj}, if a node \texttt{n} is included in the Markov Blanket of node \texttt{m}, then \texttt{adj[m,n] = 1} and \texttt{adj[n,m] = 1}. This type of representation is preferable for Rcpp code since working with lists is cumbersome and slow in Rcpp.
+
+\inputminted[linenos,mathescape=false,firstline=380,lastline=419,frame=lines]{R}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/R/mbEst.R}
+
+
+\newpage
+\section{Data Structures}
+
+\subsection{Graph}
+
+\textbf{Key attributes:}
+\begin{itemize}
+\item Provides easy access to information about the adjacency matrix, including adjacent or non-adjacent nodes
+\end{itemize}
+
+The purpose of this class is to provide a base class for storing the graph objects we will work with in our algorithms, whether it be the estimated graph or an inputted reference graph. For the sake of concision and the repeated requests of certain tasks, it made sense to make an underlying class to handle internally everything related to the graphs we are considering. \\
+
+For the graph class, the most basic variables required are the size of the network, an adjacency matrix, and the names of the nodes. Though all variables could have been given ``protected'' status, the most essential variables to reveal within the scope of a derived class would be the adjacency matrix itself and the verbose variable. Derived classes should have access to the adjacency matrix mainly due to convenience and simplicity of notation since they too make many repeated requests to either access or set adjacency matrix information.\\
+
+We also include ``sharedFunctions'' because it contains a function that helps us to print the adjacency matrix of our graph. The file ``sharedFunctions.h'' contains a dependency on RcppArmadillo, which will carry throughout the package. For speed improvements, it may be beneficial to make all of the underlying data structures increasingly reliant on this library, but that would be a feature of future research and work.\\
+
+Most of the member functions simply return basic information about the graph, but the critical function implementations to take note of are the ones which refer to neighbors or adjacent nodes. Note that the \texttt{areNeighbors} function returns true if either the $(i,j)$ entry or the $(j,i)$ are not equal to 0. Below, we can also find that we implement \texttt{getAdjacent} and \texttt{getNonAdjacent} to return nodes that have either one entry not equal to 0 or have both entries equal to 0, respectively. These function definitions are important because they are distinguished from similar functions in the DAG class. While spouses should be considered part of a neighborhood in a graph as well as a DAG, I made the decision to refrain from including them due to an implementation choice in storing Markov Blanket information, which will be seen in a followign section. To maintain simplicity, if one desires to return a neighborhood which includes spouses, it is best to use the DAG class for our particular design.\\
+
+Please note that, according to our implementation, the constructor immediately creates an adjacency matrix for a complete graph by default, or accepts an adjacency matrix as one of its arguments.
+
+\inputminted[linenos,mathescape=true,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/Graph.h}
+
+\textbf{Implementation:}
+
+\inputminted[linenos,mathescape=true,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/Graph.cpp}
+
+\subsection{DAG}
+
+\textbf{Key attributes:}
+\begin{itemize}
+\item Allows for simple access to a node's neighborhood (including spouses) and whether or not two nodes belong to the same neighborhood
+\item Can determine whether or not a node is an ancestor of another node
+\end{itemize}
+
+The DAG class is derived from the Graph class.\\
+
+There are some specific DAG functions that we need to consider, including the distinction in identifying neighborhoods in a graph versus identifying one in a DAG (i.e. including spouses in the final neighborhood). We also need to identify ancestral relations for the purposes of our metrics in the local algorithm.\\
+
+In our constructor, nothing substantial is added beyond what we have in the \texttt{Graph} class. One primary difference is that if we aren't provided with an adjacency matrix, we begin with an empty graph rather than a complete graph, since we are now dealing with DAGs and a complete graph would be inappropriate. An additional note must be made about the argument \texttt{estDAG}, which is an argument specifying whether or not we are dealing with an ``estimate of the true DAG'' or if we are dealing with the true DAG itself. The distinction is relevant for whether or not we consider spouses to be part of the neighborhood in functions like \texttt{inNeighborhood} and \texttt{getNeighbors}. An ``estimate of the true DAG'' refers to a DAG object with an adjacency matrix provided by Markov Blankets which were estimated earlier. In that estimation procedure, we do not identify spouses as such, but merely as neighbors. Therefore, they are not distinguished that way and thus any spouses found in the ensuing matrix are coincidental and should not provide the basis for identifying further neighbors. More details regarding this decision may be found in the section on Markov Blanket estimation. By default, this member variable is set to \texttt{false}.\\
+
+We also have a function to test the acyclicity of the DAG using Kahn's algorithm for a topological sort.\\
+%TODO: Add an explanation of the algorithm
+
+Another important function to consider is the \texttt{isAncestor} function. We recursively identify parents of the potential descendant node and all of its parents, checking for membership of the potential ancestor node, until we have no longer any more to consider.\\
+
+We include the \texttt{algorithm} library in order to use the sorting algorithm for our neighborhood identifying functions.
+
+\inputminted[linenos,mathescape=true,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/DAG.h}
+
+\textbf{Implementation:}
+
+\inputminted[linenos,mathescape=true,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/DAG.cpp}
+
+\subsection{MBList}
+
+\textbf{Key attributes:}
+\begin{itemize}
+\item Facilitates easy access to a node's Markov Blanket (also can be used for a vector of nodes)
+\end{itemize}
+
+This class was created to facilitate access to the Markov Blankets of nodes in which we are interested. There is both a sample version of this and a population version. For the sample version, the matrix is inputted as a result from our estimation procedure, and the Markov Blanket for node $i$ would be identified by all entries equal to 1 in row $i$ of the given matrix. For the population version, we identify Markov Blankets using the usual rules governing identifying parents, children, and spouses, and we use the implementation from the DAG class to identify these nodes.
+
+\inputminted[linenos,mathescape=true,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/MBList.h}
+
+Implementation of this class:
+\inputminted[linenos,mathescape=true,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/MBList.cpp}
+
+\subsection{SepSetList}
+
+\textbf{Key attributes:}
+\begin{itemize}
+\item Facilitates storing and accessing separation sets between variables (\texttt{NA} [not separated], \texttt{-1} [empty set], otherwise a numeric vector specifying which nodes separate them
+\end{itemize}
+
+\inputminted[linenos,mathescape=true,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/SepSetList.h}
+
+Implementation of this class:
+\inputminted[linenos,mathescape=true,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/SepSetList.cpp}
+
+\section{Constrained Algorithm Class}
+\textbf{Key attributes:}
+\begin{itemize}
+\item Serves as the basis for the local PC and local FCI classes
+\item Abstract class that takes care of a lot of the overlapped functions, but still leaves important implementation to derived classes
+\end{itemize}
+
+
+\label{sec:constrainedalgo}
+
+\inputminted[linenos,mathescape=false,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/ConstrainedAlgo.h}
+\newpage
+\subsection{Class Constructor}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=3,lastline=66]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/ConstrainedAlgo.cpp}
+\newpage
+\subsection{Check if Variables Are Separated}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=155,lastline=248]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/ConstrainedAlgo.cpp}
+\newpage
+\subsection{Identify V-Structures}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=250,lastline=338]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/ConstrainedAlgo.cpp}
+
+
+\section{Local FCI Class}
+\label{sec:fci}
+
+\inputminted[linenos,mathescape=false,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/lfci.h}
+\newpage
+\subsection{Class Constructor}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=3,lastline=26]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/lfci.cpp}
+\newpage
+\subsection{Get Total Skeleton}
+This is the first skeleton algorithm that we only apply to the targets and their first-order neighbors, obtained from the estimated Markov Blankets or from the inputted true DAG.
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=52,lastline=112]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/lfci.cpp}
+\subsection{Get Target Skeletons}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=114,lastline=205]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/lfci.cpp}
+
+\subsection{Obtain V-Structures}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=207,lastline=299]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/lfci.cpp}
+
+\subsection{FCI Rules}
+
+ Define functions for the rules used in the FCI algorithm
+Definitions:
+\begin{itemize}
+ \item[0]: No edge
+ \item[1]: $-o$
+ \item[2]: $\rightarrow$ (arrowhead)
+ \item[3]: $-$ (tail)
+\end{itemize}
+ Note that a $\ast$ represents a wild card that can represent either an open circle or an arrow
+  When we are considering the PC algorithm, for nodes i and j, if we have $i \rightarrow j$,
+ we regard $G(i,j) = 2$ and $G(j,i) = 3$. Therefore, in keeping with this convention, for FCI we will consider the arrowhead
+  information stored in G to be related to the arrowhead incident on the second node for the edge in consideration.
+  For example, if $i o-> j$ is the edge in consideration, $G(i,j)=2$, since the arrow is incident on $j$, the second node
+  Similarly, $G(j,i)=1$, since the circle is incident on node i, which is the second node for the edge between node
+  $j$ and node $i$.
+
+\subsection{Convert Ancestral Graph}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=887,lastline=930]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/lfci.cpp}
+
+\subsection{Convert Final Graph}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=932,lastline=950]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/lfci.cpp}
+
+\section{Running the Algorithm}
+
+\inputminted[linenos,mathescape=false,frame=lines,firstline=1212,lastline=1246]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/lfci.cpp}
+
+\section{Conditional Independence Tests}
+
+%TODO: WRITE ABOUT R::QNORM
+
+\inputminted[linenos,mathescape=false,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/pCorTest.h}
+
+\textbf{Implementation:}
+
+\inputminted[linenos,mathescape=false,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/pCorTest.cpp}
+
+\section{Metrics}
+
+\inputminted[linenos,mathescape=false,frame=lines]{cpp}{/home/stephen/Dropbox/Academics/Research/Code/Packages/LocalFCI/src/metrics.cpp}
+
+
+\end{document}

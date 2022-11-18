@@ -1,0 +1,947 @@
+---
+title: "Commentary on Local FCI Output"
+output: pdf_document
+date: "`r Sys.Date()`"
+---
+
+Below is sample local FCI output (using `verbose=TRUE`) provided with commentary
+
+```{r}
+library(LocalFCI)
+data("asiadf")
+asiadf_mat <- asiadf
+data("asiaDAG")
+node_names <- colnames(asiaDAG)
+p <- ncol(asiadf)
+asiaDAG <- matrix(asiaDAG,nrow = p,ncol = p)
+asiadf <- as.matrix(asiadf)
+```
+
+We will be considering the DAG ``asia" from the \texttt{bnlearn} repository to provide sample output for the local FCI algorithm.
+
+```{r,echo=FALSE,message=FALSE}
+g <- empty.graph(paste(node_names,paste0("(",1:8,")")))
+amat(g) <- asiaDAG
+graphviz.plot(g,main = "Asia DAG")
+```
+
+\newpage
+We will consider output for the following call, running the local FCI algorithm on data generated from the "asia" DAG for nodes `asia` and `either`.
+
+```{r,eval=FALSE}
+results <- localfci(data = asiadf,targets = c(1,6),node_names=node_names,verbose = TRUE)
+```
+
+\section*{MB Estimation Output}
+
+Below provides the standard output for estimating the Markov Blankets of the target nodes, as well as those of the first-order neighbors.
+\begin{verbatim}
+Estimating Markov Blankets using
+ Algorithm: MMPC 
+ Test: testIndFisher 
+ Tolerance: 0.05 
+Results for target 1 : 2 
+Estimating Markov Blankets using
+ Algorithm: MMPC 
+ Test: testIndFisher 
+ Tolerance: 0.05 
+Results for target 6 : 2,4,7,8 
+Estimating Markov Blankets using
+ Algorithm: MMPC 
+ Test: testIndFisher 
+ Tolerance: 0.05 
+Results for target 2 : 1,6 
+Estimating Markov Blankets using
+ Algorithm: MMPC 
+ Test: testIndFisher 
+ Tolerance: 0.05 
+Results for target 4 : 3,6 
+Estimating Markov Blankets using
+ Algorithm: MMPC 
+ Test: testIndFisher 
+ Tolerance: 0.05 
+Results for target 7 : 6 
+Estimating Markov Blankets using
+ Algorithm: MMPC 
+ Test: testIndFisher 
+ Tolerance: 0.05 
+Results for target 8 : 5,6 
+\end{verbatim}
+Because MMPC is an algorithm which only identifies the parent-child (P-C) set of the target node, we use an additional conditional independence test to attempt to identify an spouses. We only provide these tests for the target nodes, since knowledge of their spouses is more important than knowledge of the spouses of first-order neighbors. Since node 6 shares a P-C node with target node 1, namely node 2, we have to check if they are spouses. Though they are not, we do find that node 5 (\texttt{bronc}) is a spouse of target 6 (\texttt{either}) because of node 8 (\texttt{dysp}).
+\begin{verbatim}
+Checking if node 6 is a spouse of target 1 ... no
+Checking if node 3 is a spouse of target 6 ... no
+Checking if node 5 is a spouse of target 6 ... yes. 
+Adding 5 to MB of 6 . 5 is a newly discovered 1st-order neighbor (was previously 2nd-order).
+\end{verbatim}
+Now, we have to find the Markov Blanket for node 5 since it is now considered a first-order neighbor, remembering also to include node 6 as a spouse node in its Markov Blanket.
+\begin{verbatim}
+Estimating Markov Blankets using
+ Algorithm: MMPC 
+ Test: testIndFisher 
+ Tolerance: 0.05 
+Results for target 5 : 3,8 
+Adding target nodes to spouse's MB List: 6 
+\end{verbatim}
+We use the collected information to create an "adjacency" matrix where node $i$ is in node $j$'s MB if the $(i,j)$ and $(j,i)$ entries of the matrix are both equal to 1.
+\begin{verbatim}
+Creating the reference DAG using Markov Blanket list.
+Nodes being considered: 1,2,3,4,5,6,7,8 
+\end{verbatim}
+We now move from our R wrapper function to the C++ wrapper function, which is why we acknowledge a change in the numbering system to account for the change from a 1-index language to a 0-index language. We also begin by printing all of the information we have so far about the dataset and the graph, along with the starting conditions for the algorithm.
+\begin{verbatim}
+The node value for the C++ function is 0,5 
+There is (are) 2 target(s).
+Targets: asia either
+Using estimated Markov Blankets
+MBList Size: 7
+Markov Blankets:
+0: 1
+1: 0 5
+3: 2 5
+4: 2 5 7
+5: 1 3 4 6 7
+6: 5
+7: 4 5
+Node: 0
+Node: 5
+All nodes from neighborhoods:
+1, 3, 4, 6, 7
+There are 8 nodes in the DAG.
+There are 7 nodes in the neighborhoods we are considering.
+All nodes being considered: 0 1 3 4 5 6 7
+Our starting matrix is 7x7.
+0 1 1 1 1 1 1
+1 0 1 1 1 1 1
+1 1 0 1 1 1 1
+1 1 1 0 1 1 1
+1 1 1 1 0 1 1
+1 1 1 1 1 0 1
+1 1 1 1 1 1 0
+
+
+
+Our initial separating sets:
+S_{0,0} = nan S_{0,1} = nan S_{0,3} = nan S_{0,4} = nan S_{0,5} = nan S_{0,6} = nan S_{0,7} = nan 
+S_{1,0} = nan S_{1,1} = nan S_{1,3} = nan S_{1,4} = nan S_{1,5} = nan S_{1,6} = nan S_{1,7} = nan 
+S_{3,0} = nan S_{3,1} = nan S_{3,3} = nan S_{3,4} = nan S_{3,5} = nan S_{3,6} = nan S_{3,7} = nan 
+S_{4,0} = nan S_{4,1} = nan S_{4,3} = nan S_{4,4} = nan S_{4,5} = nan S_{4,6} = nan S_{4,7} = nan 
+S_{5,0} = nan S_{5,1} = nan S_{5,3} = nan S_{5,4} = nan S_{5,5} = nan S_{5,6} = nan S_{5,7} = nan 
+S_{6,0} = nan S_{6,1} = nan S_{6,3} = nan S_{6,4} = nan S_{6,5} = nan S_{6,6} = nan S_{6,7} = nan 
+S_{7,0} = nan S_{7,1} = nan S_{7,3} = nan S_{7,4} = nan S_{7,5} = nan S_{7,6} = nan S_{7,7} = nan
+\end{verbatim}
+It is crucial at this point to acknowledge that we are making a change in the numbering system to increase the efficiency of our algorithm. Rather than keeping all of the nodes in our matrix, we simplify our matrix to include only those nodes which are included in the neighborhoods of our target nodes. We call this the "efficient" numbering system, since it allows us to reduce the dimensions of our adjacency matrix. Though the advantage of this is less apparent for this smaller network, it will help as the size of the network increases. Below is a reprinting of our graph with the efficient numbering system.
+
+\begin{verbatim}
+Element mapping for efficient ordering (True -> Efficient):
+0 0
+1 1
+3 2
+4 3
+5 4
+6 5
+7 6
+\end{verbatim}
+
+```{r,echo=FALSE,message=FALSE}
+g <- empty.graph(paste(node_names,paste0("(",c(0:1,"-",2:6),")")))
+amat(g) <- asiaDAG
+graphviz.plot(g)
+```
+
+\begin{verbatim}
+Beginning the Local FCI algorithm over all neighborhoods.
+The value of l is 0
+The value of i is 0 (asia)
+The value of j is 1 (tub)
+The p-value is 3.56673e-05
+The value of j is 2 (lung)
+The p-value is 0.313908
+asia is separated from lung (p-value>0.01)
+The value of j is 3 (bronc)
+The p-value is 0.299243
+asia is separated from bronc (p-value>0.01)
+The value of j is 4 (either)
+The p-value is 0.0111816
+asia is separated from either (p-value>0.01)
+The value of j is 5 (xray)
+The p-value is 0.122535
+asia is separated from xray (p-value>0.01)
+The value of j is 6 (dysp)
+The p-value is 0.0167876
+asia is separated from dysp (p-value>0.01)
+The value of i is 1 (tub)
+The value of j is 2 (lung)
+The p-value is 0.631592
+tub is separated from lung (p-value>0.01)
+The value of j is 3 (bronc)
+The p-value is 0.579122
+tub is separated from bronc (p-value>0.01)
+The value of j is 4 (either)
+The p-value is 2.96476e-07
+The value of j is 5 (xray)
+The p-value is 0.000237354
+The value of j is 6 (dysp)
+The p-value is 0.0049716
+The value of i is 2 (lung)
+The value of j is 3 (bronc)
+The p-value is 0.00672051
+The value of j is 4 (either)
+The p-value is 2.97187e-109
+The value of j is 5 (xray)
+The p-value is 4.66386e-32
+The value of j is 6 (dysp)
+The p-value is 9.83333e-14
+The value of i is 3 (bronc)
+The value of j is 4 (either)
+The p-value is 0.0431059
+bronc is separated from either (p-value>0.01)
+The value of j is 5 (xray)
+The p-value is 0.0911787
+bronc is separated from xray (p-value>0.01)
+The value of j is 6 (dysp)
+The p-value is 6.74668e-84
+The value of i is 4 (either)
+The value of j is 5 (xray)
+The p-value is 1.61025e-56
+The value of j is 6 (dysp)
+The p-value is 9.48354e-32
+The value of i is 5 (xray)
+The value of j is 6 (dysp)
+The p-value is 7.06056e-12
+The value of i is 6 (dysp)
+\end{verbatim}
+
+We now begin to consider conditional independence relationships, starting with a conditioning set of size 1.
+
+\begin{verbatim}
+The value of l is 1
+The value of i is 0 (asia)
+The value of j is 1 (tub)
+There are 3 neighbors.
+Efficient Setup: 0 -> 0 | 1 -> 1 | k (True Vals): 5 (either)
+The p-value is 0.000250125
+asia is NOT separated from tub by node(s): either  (p-value<0.01)
+Efficient Setup: 0 -> 0 | 1 -> 1 | k (True Vals): 6 (xray)
+The p-value is 8.37935e-05
+asia is NOT separated from tub by node(s): xray  (p-value<0.01)
+Efficient Setup: 0 -> 0 | 1 -> 1 | k (True Vals): 7 (dysp)
+The p-value is 0.000106419
+asia is NOT separated from tub by node(s): dysp  (p-value<0.01)
+The value of i is 1 (tub)
+The value of j is 4 (either)
+There are 4 neighbors.
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 (asia)
+The p-value is 2.04304e-06
+tub is NOT separated from either by node(s): asia  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 (lung)
+The p-value is 9.35856e-14
+tub is NOT separated from either by node(s): lung  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 6 (xray)
+The p-value is 0.000285486
+tub is NOT separated from either by node(s): xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 7 (dysp)
+The p-value is 1.75872e-05
+tub is NOT separated from either by node(s): dysp  (p-value<0.01)
+The value of j is 5 (xray)
+There are 4 neighbors.
+Efficient Setup: 1 -> 1 | 5 -> 6 | k (True Vals): 0 (asia)
+The p-value is 0.000560692
+tub is NOT separated from xray by node(s): asia  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 5 -> 6 | k (True Vals): 3 (lung)
+The p-value is 8.3008e-05
+tub is NOT separated from xray by node(s): lung  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 5 -> 6 | k (True Vals): 5 (either)
+The p-value is 0.464335
+tub is separated from xray by node(s): either  (p-value>0.01)
+The value of j is 6 (dysp)
+There are 5 neighbors.
+Efficient Setup: 1 -> 1 | 6 -> 7 | k (True Vals): 0 (asia)
+The p-value is 0.0155695
+tub is separated from dysp by node(s): asia  (p-value>0.01)
+The value of i is 2 (lung)
+The value of j is 3 (bronc)
+There are 3 neighbors.
+Efficient Setup: 2 -> 3 | 3 -> 4 | k (True Vals): 5 (either)
+The p-value is 0.0717706
+lung is separated from bronc by node(s): either  (p-value>0.01)
+The value of j is 4 (either)
+There are 4 neighbors.
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 (tub)
+The p-value is 3.10595e-117
+lung is NOT separated from either by node(s): tub  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 4 (bronc)
+The p-value is 7.07433e-108
+lung is NOT separated from either by node(s): bronc  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 6 (xray)
+The p-value is 7.13973e-73
+lung is NOT separated from either by node(s): xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 7 (dysp)
+The p-value is 1.21991e-94
+lung is NOT separated from either by node(s): dysp  (p-value<0.01)
+The value of j is 5 (xray)
+There are 3 neighbors.
+Efficient Setup: 2 -> 3 | 5 -> 6 | k (True Vals): 4 (bronc)
+The p-value is 2.3062e-31
+lung is NOT separated from xray by node(s): bronc  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 5 -> 6 | k (True Vals): 5 (either)
+The p-value is 0.387146
+lung is separated from xray by node(s): either  (p-value>0.01)
+The value of j is 6 (dysp)
+There are 3 neighbors.
+Efficient Setup: 2 -> 3 | 6 -> 7 | k (True Vals): 4 (bronc)
+The p-value is 3.01325e-48
+lung is NOT separated from dysp by node(s): bronc  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 6 -> 7 | k (True Vals): 5 (either)
+The p-value is 0.0810771
+lung is separated from dysp by node(s): either  (p-value>0.01)
+The value of i is 3 (bronc)
+The value of j is 6 (dysp)
+There are 2 neighbors.
+Efficient Setup: 3 -> 4 | 6 -> 7 | k (True Vals): 5 (either)
+The p-value is 1.86754e-176
+bronc is NOT separated from dysp by node(s): either  (p-value<0.01)
+Efficient Setup: 3 -> 4 | 6 -> 7 | k (True Vals): 6 (xray)
+The p-value is 1.61932e-109
+bronc is NOT separated from dysp by node(s): xray  (p-value<0.01)
+The value of i is 4 (either)
+The value of j is 5 (xray)
+There are 3 neighbors.
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 (tub)
+The p-value is 3.72487e-53
+either is NOT separated from xray by node(s): tub  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 3 (lung)
+The p-value is 2.75087e-24
+either is NOT separated from xray by node(s): lung  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 7 (dysp)
+The p-value is 7.26492e-45
+either is NOT separated from xray by node(s): dysp  (p-value<0.01)
+The value of j is 6 (dysp)
+There are 4 neighbors.
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 (tub)
+The p-value is 7.29264e-30
+either is NOT separated from dysp by node(s): tub  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 3 (lung)
+The p-value is 1.21054e-19
+either is NOT separated from dysp by node(s): lung  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 4 (bronc)
+The p-value is 8.04073e-114
+either is NOT separated from dysp by node(s): bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 6 (xray)
+The p-value is 8.06707e-21
+either is NOT separated from dysp by node(s): xray  (p-value<0.01)
+The value of i is 5 (xray)
+The value of j is 6 (dysp)
+There are 2 neighbors.
+Efficient Setup: 5 -> 6 | 6 -> 7 | k (True Vals): 4 (bronc)
+The p-value is 1.55671e-33
+xray is NOT separated from dysp by node(s): bronc  (p-value<0.01)
+Efficient Setup: 5 -> 6 | 6 -> 7 | k (True Vals): 5 (either)
+The p-value is 0.910011
+xray is separated from dysp by node(s): either  (p-value>0.01)
+The value of i is 6 (dysp)
+\end{verbatim}
+Now, we look at conditioning sets of size 2.
+\begin{verbatim}
+The value of l is 2
+The value of i is 0 (asia)
+The value of j is 1 (tub)
+The value of i is 1 (tub)
+The value of j is 4 (either)
+There are 4 neighbors.
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 3 (asia lung)
+The p-value is 1.47654e-12
+tub is NOT separated from either by node(s): asia lung  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 6 (asia xray)
+The p-value is 0.000863371
+tub is NOT separated from either by node(s): asia xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 7 (asia dysp)
+The p-value is 4.49478e-05
+tub is NOT separated from either by node(s): asia dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 6 (lung xray)
+The p-value is 1.99198e-10
+tub is NOT separated from either by node(s): lung xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 7 (lung dysp)
+The p-value is 6.06083e-12
+tub is NOT separated from either by node(s): lung dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 6 7 (xray dysp)
+The p-value is 0.00156137
+tub is NOT separated from either by node(s): xray dysp  (p-value<0.01)
+The value of i is 2 (lung)
+The value of j is 4 (either)
+There are 3 neighbors.
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 6 (tub xray)
+The p-value is 7.25594e-80
+lung is NOT separated from either by node(s): tub xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 7 (tub dysp)
+The p-value is 2.39758e-102
+lung is NOT separated from either by node(s): tub dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 6 7 (xray dysp)
+The p-value is 1.5714e-67
+lung is NOT separated from either by node(s): xray dysp  (p-value<0.01)
+The value of i is 3 (bronc)
+The value of j is 6 (dysp)
+The value of i is 4 (either)
+The value of j is 5 (xray)
+There are 3 neighbors.
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 3 (tub lung)
+The p-value is 7.17702e-21
+either is NOT separated from xray by node(s): tub lung  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 7 (tub dysp)
+The p-value is 9.81323e-43
+either is NOT separated from xray by node(s): tub dysp  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 3 7 (lung dysp)
+The p-value is 8.61051e-21
+either is NOT separated from xray by node(s): lung dysp  (p-value<0.01)
+The value of j is 6 (dysp)
+There are 4 neighbors.
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 3 (tub lung)
+The p-value is 8.41815e-18
+either is NOT separated from dysp by node(s): tub lung  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 4 (tub bronc)
+The p-value is 1.59159e-110
+either is NOT separated from dysp by node(s): tub bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 6 (tub xray)
+The p-value is 4.64532e-20
+either is NOT separated from dysp by node(s): tub xray  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 3 4 (lung bronc)
+The p-value is 1.28527e-59
+either is NOT separated from dysp by node(s): lung bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 3 6 (lung xray)
+The p-value is 3.41996e-16
+either is NOT separated from dysp by node(s): lung xray  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 4 6 (bronc xray)
+The p-value is 1.34733e-75
+either is NOT separated from dysp by node(s): bronc xray  (p-value<0.01)
+The value of i is 5 (xray)
+The value of i is 6 (dysp)
+\end{verbatim}
+Now, conditioning sets of size 3.
+\begin{verbatim}
+The value of l is 3
+The value of i is 0 (asia)
+The value of j is 1 (tub)
+The value of i is 1 (tub)
+The value of j is 4 (either)
+There are 4 neighbors.
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 3 6 (asia lung xray)
+The p-value is 1.63002e-09
+tub is NOT separated from either by node(s): asia lung xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 3 7 (asia lung dysp)
+The p-value is 3.548e-11
+tub is NOT separated from either by node(s): asia lung dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 6 7 (asia xray dysp)
+The p-value is 0.00285872
+tub is NOT separated from either by node(s): asia xray dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 6 7 (lung xray dysp)
+The p-value is 2.54582e-09
+tub is NOT separated from either by node(s): lung xray dysp  (p-value<0.01)
+The value of i is 2 (lung)
+The value of j is 4 (either)
+There are 3 neighbors.
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 6 7 (tub xray dysp)
+The p-value is 5.4123e-74
+lung is NOT separated from either by node(s): tub xray dysp  (p-value<0.01)
+The value of i is 3 (bronc)
+The value of j is 6 (dysp)
+The value of i is 4 (either)
+The value of j is 5 (xray)
+There are 3 neighbors.
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 3 7 (tub lung dysp)
+The p-value is 4.10887e-18
+either is NOT separated from xray by node(s): tub lung dysp  (p-value<0.01)
+The value of j is 6 (dysp)
+There are 4 neighbors.
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 3 4 (tub lung bronc)
+The p-value is 3.62282e-56
+either is NOT separated from dysp by node(s): tub lung bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 3 6 (tub lung xray)
+The p-value is 4.56682e-15
+either is NOT separated from dysp by node(s): tub lung xray  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 4 6 (tub bronc xray)
+The p-value is 8.18002e-75
+either is NOT separated from dysp by node(s): tub bronc xray  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 3 4 6 (lung bronc xray)
+The p-value is 9.07913e-48
+either is NOT separated from dysp by node(s): lung bronc xray  (p-value<0.01)
+The value of i is 5 (xray)
+The value of i is 6 (dysp)
+\end{verbatim}
+This concludes the total skeleton portion of our procedure. Below is a summary of the results so far.
+
+\begin{verbatim}
+Values after Total Skeleton Run
+
+p: 8
+n: 500
+N: 7
+Number of Targets: 2
+Node names: asia tub smoke lung bronc either xray dysp 
+lmax: 3
+verbose: 1
+Nodes under consideration: 0 1 3 4 5 6 7
+Ctilde:
+Our Ctilde matrix is 7x7
+0 1 0 0 0 0 0
+1 0 0 0 1 0 0
+0 0 0 0 1 0 0
+0 0 0 0 0 0 1
+0 1 1 0 0 1 1
+0 0 0 0 1 0 0
+0 0 0 1 1 0 0
+Our DAG matrix is 
+0 1 0 0 0 0 0 0
+1 0 0 0 0 1 0 0
+0 0 0 1 1 0 0 0
+0 0 1 0 0 1 0 0
+0 0 1 0 0 1 0 1
+0 1 0 1 1 0 1 1
+0 0 0 0 0 1 0 0
+0 0 0 0 1 1 0 0
+Our Markov Blankets are
+MBList Size: 7
+Markov Blankets:
+0: 1
+1: 0 5
+3: 2 5
+4: 2 5 7
+5: 1 3 4 6 7
+6: 5
+7: 4 5
+Separating Set Values:
+S_{0,0} = nan S_{0,1} = nan S_{0,3} = -1 S_{0,4} = -1 S_{0,5} = -1 S_{0,6} = -1 S_{0,7} = -1 
+S_{1,0} = nan S_{1,1} = nan S_{1,3} = -1 S_{1,4} = -1 S_{1,5} = nan S_{1,6} = 5 S_{1,7} = 0 
+S_{3,0} = -1 S_{3,1} = -1 S_{3,3} = nan S_{3,4} = 5 S_{3,5} = nan S_{3,6} = 5 S_{3,7} = 5 
+S_{4,0} = -1 S_{4,1} = -1 S_{4,3} = 5 S_{4,4} = nan S_{4,5} = -1 S_{4,6} = -1 S_{4,7} = nan 
+S_{5,0} = -1 S_{5,1} = nan S_{5,3} = nan S_{5,4} = -1 S_{5,5} = nan S_{5,6} = nan S_{5,7} = nan 
+S_{6,0} = -1 S_{6,1} = 5 S_{6,3} = 5 S_{6,4} = -1 S_{6,5} = nan S_{6,6} = nan S_{6,7} = 5 
+S_{7,0} = -1 S_{7,1} = 0 S_{7,3} = 5 S_{7,4} = nan S_{7,5} = nan S_{7,6} = 5 S_{7,7} = nan 
+Number of tests so far: 80
+First and last elements of the dataset: -0.641447 0.198884
+\end{verbatim}
+We now begin the second stage of our skeleton recovery procedure, identifying any further edges for deletion in each individual target neighborhood, now using second-order neighbors. Note that we start with conditioning sets of size 1, since we have already considered all possible tests with empty conditioning sets.
+
+\begin{verbatim}
+Beginning algorithm over each individual neighborhood.
+
+
+Finding skeleton for the neighborhood of target 0 (Efficient Number: 0)
+Neighborhood nodes under consideration: 0 1 | (asia(0) tub(1))
+The value of l is 1
+The value of i is 0
+The value of j is 1
+Potential separating nodes: 5
+There are 1 neighbor(s).
+Efficient Setup: 0 -> 0 | 1 -> 1 | k (True Vals): 5 (either)
+The p-value is 0.000250125
+asia is NOT separated from tub by node(s): either  (p-value<0.01)
+The value of i is 1
+The value of l is 2
+The value of i is 0
+The value of j is 1
+Potential separating nodes: 5
+The value of i is 1
+The value of l is 3
+The value of i is 0
+The value of j is 1
+Potential separating nodes: 5
+The value of i is 1
+The final C matrix:
+0 1 0 0 0 0 0
+1 0 0 0 1 0 0
+0 0 0 0 1 0 0
+0 0 0 0 0 0 1
+0 1 1 0 0 1 1
+0 0 0 0 1 0 0
+0 0 0 1 1 0 0
+Conclusion of algorithm.
+
+
+Finding skeleton for the neighborhood of target 5 (Efficient Number: 4)
+Neighborhood nodes under consideration: 
+1 2 3 4 5 6 | (tub(1) lung(3) bronc(4) either(5) xray(6) dysp(7))
+The value of l is 1
+The value of i is 1
+The value of j is 4
+Potential separating nodes: 0 3 4 6 7
+There are 5 neighbor(s).
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 (asia)
+The p-value is 2.04304e-06
+tub is NOT separated from either by node(s): asia  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 (lung)
+The p-value is 9.35856e-14
+tub is NOT separated from either by node(s): lung  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 4 (bronc)
+The p-value is 2.02399e-07
+tub is NOT separated from either by node(s): bronc  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 6 (xray)
+The p-value is 0.000285486
+tub is NOT separated from either by node(s): xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 7 (dysp)
+The p-value is 1.75872e-05
+tub is NOT separated from either by node(s): dysp  (p-value<0.01)
+The value of i is 2
+The value of j is 4
+Potential separating nodes: 1 2 4 6 7
+There are 5 neighbor(s).
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 (tub)
+The p-value is 3.10595e-117
+lung is NOT separated from either by node(s): tub  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 2 (smoke)
+The p-value is 5.05153e-105
+lung is NOT separated from either by node(s): smoke  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 4 (bronc)
+The p-value is 7.07433e-108
+lung is NOT separated from either by node(s): bronc  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 6 (xray)
+The p-value is 7.13973e-73
+lung is NOT separated from either by node(s): xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 7 (dysp)
+The p-value is 1.21991e-94
+lung is NOT separated from either by node(s): dysp  (p-value<0.01)
+The value of i is 3
+The value of j is 6
+Potential separating nodes: 2 5
+There are 2 neighbor(s).
+Efficient Setup: 3 -> 4 | 6 -> 7 | k (True Vals): 2 (smoke)
+The p-value is 3.28744e-82
+bronc is NOT separated from dysp by node(s): smoke  (p-value<0.01)
+Efficient Setup: 3 -> 4 | 6 -> 7 | k (True Vals): 5 (either)
+The p-value is 1.86754e-176
+bronc is NOT separated from dysp by node(s): either  (p-value<0.01)
+The value of i is 4
+The value of j is 6
+Potential separating nodes: 1 3 4 6
+There are 4 neighbor(s).
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 (tub)
+The p-value is 7.29264e-30
+either is NOT separated from dysp by node(s): tub  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 3 (lung)
+The p-value is 1.21054e-19
+either is NOT separated from dysp by node(s): lung  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 4 (bronc)
+The p-value is 8.04073e-114
+either is NOT separated from dysp by node(s): bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 6 (xray)
+The p-value is 8.06707e-21
+either is NOT separated from dysp by node(s): xray  (p-value<0.01)
+The value of j is 5
+Potential separating nodes: 1 3 4 7
+There are 4 neighbor(s).
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 (tub)
+The p-value is 3.72487e-53
+either is NOT separated from xray by node(s): tub  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 3 (lung)
+The p-value is 2.75087e-24
+either is NOT separated from xray by node(s): lung  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 4 (bronc)
+The p-value is 8.99546e-56
+either is NOT separated from xray by node(s): bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 7 (dysp)
+The p-value is 7.26492e-45
+either is NOT separated from xray by node(s): dysp  (p-value<0.01)
+The value of i is 5
+The value of i is 6
+The value of l is 2
+The value of i is 1
+The value of j is 4
+Potential separating nodes: 0 3 4 6 7
+There are 5 neighbor(s).
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 3 (asia lung)
+The p-value is 1.47654e-12
+tub is NOT separated from either by node(s): asia lung  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 4 (asia bronc)
+The p-value is 1.5435e-06
+tub is NOT separated from either by node(s): asia bronc  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 6 (asia xray)
+The p-value is 0.000863371
+tub is NOT separated from either by node(s): asia xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 7 (asia dysp)
+The p-value is 4.49478e-05
+tub is NOT separated from either by node(s): asia dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 4 (lung bronc)
+The p-value is 9.79205e-14
+tub is NOT separated from either by node(s): lung bronc  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 6 (lung xray)
+The p-value is 1.99198e-10
+tub is NOT separated from either by node(s): lung xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 7 (lung dysp)
+The p-value is 6.06083e-12
+tub is NOT separated from either by node(s): lung dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 4 6 (bronc xray)
+The p-value is 0.000231813
+tub is NOT separated from either by node(s): bronc xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 4 7 (bronc dysp)
+The p-value is 5.99369e-05
+tub is NOT separated from either by node(s): bronc dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 6 7 (xray dysp)
+The p-value is 0.00156137
+tub is NOT separated from either by node(s): xray dysp  (p-value<0.01)
+The value of i is 2
+The value of j is 4
+Potential separating nodes: 1 2 4 6 7
+There are 5 neighbor(s).
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 2 (tub smoke)
+The p-value is 4.9879e-111
+lung is NOT separated from either by node(s): tub smoke  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 4 (tub bronc)
+The p-value is 1.31928e-115
+lung is NOT separated from either by node(s): tub bronc  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 6 (tub xray)
+The p-value is 7.25594e-80
+lung is NOT separated from either by node(s): tub xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 7 (tub dysp)
+The p-value is 2.39758e-102
+lung is NOT separated from either by node(s): tub dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 2 4 (smoke bronc)
+The p-value is 7.70358e-105
+lung is NOT separated from either by node(s): smoke bronc  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 2 6 (smoke xray)
+The p-value is 4.10318e-71
+lung is NOT separated from either by node(s): smoke xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 2 7 (smoke dysp)
+The p-value is 3.88973e-81
+lung is NOT separated from either by node(s): smoke dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 4 6 (bronc xray)
+The p-value is 2.45256e-72
+lung is NOT separated from either by node(s): bronc xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 4 7 (bronc dysp)
+The p-value is 2.35293e-54
+lung is NOT separated from either by node(s): bronc dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 6 7 (xray dysp)
+The p-value is 1.5714e-67
+lung is NOT separated from either by node(s): xray dysp  (p-value<0.01)
+The value of i is 3
+The value of j is 6
+Potential separating nodes: 2 5
+There are 2 neighbor(s).
+Efficient Setup: 3 -> 4 | 6 -> 7 | k (True Vals): 2 5 (smoke either)
+The p-value is 9.14632e-161
+bronc is NOT separated from dysp by node(s): smoke either  (p-value<0.01)
+The value of i is 4
+The value of j is 6
+Potential separating nodes: 1 3 4 6
+There are 4 neighbor(s).
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 3 (tub lung)
+The p-value is 8.41815e-18
+either is NOT separated from dysp by node(s): tub lung  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 4 (tub bronc)
+The p-value is 1.59159e-110
+either is NOT separated from dysp by node(s): tub bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 6 (tub xray)
+The p-value is 4.64532e-20
+either is NOT separated from dysp by node(s): tub xray  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 3 4 (lung bronc)
+The p-value is 1.28527e-59
+either is NOT separated from dysp by node(s): lung bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 3 6 (lung xray)
+The p-value is 3.41996e-16
+either is NOT separated from dysp by node(s): lung xray  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 4 6 (bronc xray)
+The p-value is 1.34733e-75
+either is NOT separated from dysp by node(s): bronc xray  (p-value<0.01)
+The value of j is 5
+Potential separating nodes: 1 3 4 7
+There are 4 neighbor(s).
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 3 (tub lung)
+The p-value is 7.17702e-21
+either is NOT separated from xray by node(s): tub lung  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 4 (tub bronc)
+The p-value is 2.49022e-52
+either is NOT separated from xray by node(s): tub bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 7 (tub dysp)
+The p-value is 9.81323e-43
+either is NOT separated from xray by node(s): tub dysp  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 3 4 (lung bronc)
+The p-value is 2.94911e-24
+either is NOT separated from xray by node(s): lung bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 3 7 (lung dysp)
+The p-value is 8.61051e-21
+either is NOT separated from xray by node(s): lung dysp  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 4 7 (bronc dysp)
+The p-value is 2.69334e-22
+either is NOT separated from xray by node(s): bronc dysp  (p-value<0.01)
+The value of i is 5
+The value of i is 6
+The value of l is 3
+The value of i is 1
+The value of j is 4
+Potential separating nodes: 0 3 4 6 7
+There are 5 neighbor(s).
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 3 4 (asia lung bronc)
+The p-value is 1.51885e-12
+tub is NOT separated from either by node(s): asia lung bronc  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 3 6 (asia lung xray)
+The p-value is 1.63002e-09
+tub is NOT separated from either by node(s): asia lung xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 3 7 (asia lung dysp)
+The p-value is 3.548e-11
+tub is NOT separated from either by node(s): asia lung dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 4 6 (asia bronc xray)
+The p-value is 0.000733463
+tub is NOT separated from either by node(s): asia bronc xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 4 7 (asia bronc dysp)
+The p-value is 0.000122697
+tub is NOT separated from either by node(s): asia bronc dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 0 6 7 (asia xray dysp)
+The p-value is 0.00285872
+tub is NOT separated from either by node(s): asia xray dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 4 6 (lung bronc xray)
+The p-value is 2.14787e-10
+tub is NOT separated from either by node(s): lung bronc xray  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 4 7 (lung bronc dysp)
+The p-value is 1.02418e-10
+tub is NOT separated from either by node(s): lung bronc dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 3 6 7 (lung xray dysp)
+The p-value is 2.54582e-09
+tub is NOT separated from either by node(s): lung xray dysp  (p-value<0.01)
+Efficient Setup: 1 -> 1 | 4 -> 5 | k (True Vals): 4 6 7 (bronc xray dysp)
+The p-value is 0.000856835
+tub is NOT separated from either by node(s): bronc xray dysp  (p-value<0.01)
+The value of i is 2
+The value of j is 4
+Potential separating nodes: 1 2 4 6 7
+There are 5 neighbor(s).
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 2 4 (tub smoke bronc)
+The p-value is 7.80299e-111
+lung is NOT separated from either by node(s): tub smoke bronc  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 2 6 (tub smoke xray)
+The p-value is 6.27627e-77
+lung is NOT separated from either by node(s): tub smoke xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 2 7 (tub smoke dysp)
+The p-value is 3.4474e-87
+lung is NOT separated from either by node(s): tub smoke dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 4 6 (tub bronc xray)
+The p-value is 3.50039e-79
+lung is NOT separated from either by node(s): tub bronc xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 4 7 (tub bronc dysp)
+The p-value is 1.16445e-60
+lung is NOT separated from either by node(s): tub bronc dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 1 6 7 (tub xray dysp)
+The p-value is 5.4123e-74
+lung is NOT separated from either by node(s): tub xray dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 2 4 6 (smoke bronc xray)
+The p-value is 5.33318e-71
+lung is NOT separated from either by node(s): smoke bronc xray  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 2 4 7 (smoke bronc dysp)
+The p-value is 4.21368e-54
+lung is NOT separated from either by node(s): smoke bronc dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 2 6 7 (smoke xray dysp)
+The p-value is 1.8416e-59
+lung is NOT separated from either by node(s): smoke xray dysp  (p-value<0.01)
+Efficient Setup: 2 -> 3 | 4 -> 5 | k (True Vals): 4 6 7 (bronc xray dysp)
+The p-value is 1.00846e-44
+lung is NOT separated from either by node(s): bronc xray dysp  (p-value<0.01)
+The value of i is 3
+The value of j is 6
+Potential separating nodes: 2 5
+The value of i is 4
+The value of j is 6
+Potential separating nodes: 1 3 4 6
+There are 4 neighbor(s).
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 3 4 (tub lung bronc)
+The p-value is 3.62282e-56
+either is NOT separated from dysp by node(s): tub lung bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 3 6 (tub lung xray)
+The p-value is 4.56682e-15
+either is NOT separated from dysp by node(s): tub lung xray  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 1 4 6 (tub bronc xray)
+The p-value is 8.18002e-75
+either is NOT separated from dysp by node(s): tub bronc xray  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 6 -> 7 | k (True Vals): 3 4 6 (lung bronc xray)
+The p-value is 9.07913e-48
+either is NOT separated from dysp by node(s): lung bronc xray  (p-value<0.01)
+The value of j is 5
+Potential separating nodes: 1 3 4 7
+There are 4 neighbor(s).
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 3 4 (tub lung bronc)
+The p-value is 7.9342e-21
+either is NOT separated from xray by node(s): tub lung bronc  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 3 7 (tub lung dysp)
+The p-value is 4.10887e-18
+either is NOT separated from xray by node(s): tub lung dysp  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 1 4 7 (tub bronc dysp)
+The p-value is 4.13227e-21
+either is NOT separated from xray by node(s): tub bronc dysp  (p-value<0.01)
+Efficient Setup: 4 -> 5 | 5 -> 6 | k (True Vals): 3 4 7 (lung bronc dysp)
+The p-value is 1.96509e-13
+either is NOT separated from xray by node(s): lung bronc dysp  (p-value<0.01)
+The value of i is 5
+The value of i is 6
+The final C matrix:
+0 1 0 0 0 0 0
+1 0 0 0 1 0 0
+0 0 0 0 1 0 0
+0 0 0 0 0 0 1
+0 1 1 0 0 1 1
+0 0 0 0 1 0 0
+0 0 0 1 1 0 0
+Conclusion of algorithm.
+\end{verbatim}
+We will now apply relevant FCI rules to orient as many edges as possible, beginning with finding v-structures.
+\begin{verbatim}
+Beginning loops to find v-structures.
+i: 0 (asia)
+j: 2 (lung)
+j: 3 (bronc)
+j: 4 (either)
+Potential k values: tub
+k: 1 (tub)
+Separation Set: -1 | V-Structure (True Numbering): 0*->1<-*5
+Rule 0 has been used 1 times.
+j: 5 (xray)
+j: 6 (dysp)
+i: 1 (tub)
+j: 2 (lung)
+Potential k values: either
+k: 4 (either)
+Separation Set: -1 | V-Structure (True Numbering): 1*->5<-*3
+Rule 0 has been used 2 times.
+j: 3 (bronc)
+j: 5 (xray)
+Potential k values: either
+k: 4 (either)
+j: 6 (dysp)
+Potential k values: either
+k: 4 (either)
+Separation Set: 0 | V-Structure (True Numbering): 1*->5<-*7
+Rule 0 has been used 3 times.
+i: 2 (lung)
+j: 3 (bronc)
+j: 5 (xray)
+Potential k values: either
+k: 4 (either)
+j: 6 (dysp)
+Potential k values: either
+k: 4 (either)
+i: 3 (bronc)
+j: 4 (either)
+Potential k values: dysp
+k: 6 (dysp)
+Separation Set: -1 | V-Structure (True Numbering): 4*->7<-*5
+Rule 0 has been used 4 times.
+j: 5 (xray)
+i: 4 (either)
+i: 5 (xray)
+j: 6 (dysp)
+Potential k values: either
+k: 4 (either)
+i: 6 (dysp)
+Rule 1:
+Orient: 1 *-> 4 o-* 5 as 4 -> 5
+Rule 1 has been used 1 times.
+Potential alpha: 0 | Potential gamma: 1
+Potential alpha: 2 | Potential gamma: 4
+Potential alpha: 3 | Potential gamma: 6
+Potential alpha: 0 | Potential gamma: 1
+Potential alpha: 2 | Potential gamma: 4
+Potential alpha: 3 | Potential gamma: 6
+\end{verbatim}
+
+```{r,echo=FALSE}
+results <- localfci(data = asiadf,targets = c(1,6),node_names=node_names,verbose = FALSE)
+g_f <- empty.graph(node_names)
+amat(g_f) <- results$amat
+graphviz.plot(g_f,main = "Final Results from Local FCI")
+```
+
